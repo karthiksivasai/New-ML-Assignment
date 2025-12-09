@@ -1,0 +1,5 @@
+{
+  "name": "NeuroFlow AutoML",
+  "description": "A no-code, drag-and-drop style machine learning pipeline builder. Upload data, preprocess, split, and train models instantly.",
+  "requestFramePermissions": []
+}
