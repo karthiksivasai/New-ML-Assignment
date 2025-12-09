@@ -19,9 +19,22 @@ const App: React.FC = () => {
     error: null,
   });
 
+  // Warn user if they try to leave while training
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (state.isTraining) {
+        e.preventDefault();
+        e.returnValue = ''; // Legacy support
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [state.isTraining]);
+
   // Automatically re-apply scaler when scaler option or dataset changes (but only if we are at step 2)
   useEffect(() => {
     if (state.step >= 2 && state.dataset) {
+      // Use raw data as source to avoid compounding scaling
       const processed = applyScaling(state.dataset.raw, state.dataset.stats, state.scaler, state.dataset.targetColumn);
       setState(prev => ({
         ...prev,
@@ -29,7 +42,7 @@ const App: React.FC = () => {
       }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.scaler, state.step]); 
+  }, [state.scaler, state.dataset?.raw, state.dataset?.targetColumn, state.step]); 
 
   const handleDataLoaded = (dataset: Dataset) => {
     setState(prev => ({ ...prev, dataset, step: 2, error: null }));
@@ -38,7 +51,7 @@ const App: React.FC = () => {
   const handleNext = () => {
     if (state.step === 2) {
       if (!state.dataset?.targetColumn || state.dataset.featureColumns.length === 0) {
-        setState(prev => ({ ...prev, error: 'Please select a target column and at least one feature.' }));
+        setState(prev => ({ ...prev, error: 'Please select a target column and at least one feature column.' }));
         return;
       }
     }
@@ -66,38 +79,42 @@ const App: React.FC = () => {
       setState(prev => ({ 
         ...prev, 
         isTraining: false, 
-        error: err.message || 'An error occurred during training.' 
+        error: err.message || 'An unexpected error occurred during training.' 
       }));
     }
   };
 
   const handleReset = () => {
-    setState({
-      step: 1,
-      dataset: null,
-      scaler: 'None',
-      splitRatio: 80,
-      selectedModel: null,
-      isTraining: false,
-      results: null,
-      error: null,
-    });
+    if (state.isTraining) return;
+    if (confirm("Are you sure you want to reset the pipeline? All data and progress will be lost.")) {
+      setState({
+        step: 1,
+        dataset: null,
+        scaler: 'None',
+        splitRatio: 80,
+        selectedModel: null,
+        isTraining: false,
+        results: null,
+        error: null,
+      });
+    }
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-indigo-200 shadow-md">
               <span className="text-white font-bold text-lg">N</span>
             </div>
             <h1 className="text-xl font-bold text-slate-800 tracking-tight">NeuroFlow <span className="text-indigo-600">AutoML</span></h1>
           </div>
           <button 
             onClick={handleReset} 
-            className="text-sm font-medium text-slate-500 hover:text-indigo-600 flex items-center gap-1 transition-colors"
+            disabled={state.isTraining}
+            className={`text-sm font-medium flex items-center gap-1 transition-colors ${state.isTraining ? 'text-slate-300 cursor-not-allowed' : 'text-slate-500 hover:text-indigo-600'}`}
           >
             <RefreshCw className="w-4 h-4" /> Reset Pipeline
           </button>
@@ -109,12 +126,12 @@ const App: React.FC = () => {
         
         <PipelineVisualizer currentStep={state.step} />
 
-        <div className="w-full bg-white rounded-2xl shadow-sm border border-slate-200 min-h-[500px] flex flex-col relative overflow-hidden">
+        <div className="w-full bg-white rounded-2xl shadow-sm border border-slate-200 min-h-[500px] flex flex-col relative overflow-hidden transition-all duration-300">
           
           {/* Content Area */}
           <div className="flex-1 p-8">
             {state.error && (
-              <div className="mb-6 bg-rose-50 text-rose-600 px-4 py-3 rounded-lg text-sm font-medium border border-rose-100 flex items-center gap-2">
+              <div className="mb-6 bg-rose-50 text-rose-600 px-4 py-3 rounded-lg text-sm font-medium border border-rose-100 flex items-center gap-2 animate-in slide-in-from-top-2">
                 <span className="font-bold">Error:</span> {state.error}
               </div>
             )}
@@ -151,7 +168,7 @@ const App: React.FC = () => {
             
             {/* Loading Overlay */}
             {state.isTraining && (
-              <div className="absolute inset-0 bg-white/90 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
+              <div className="absolute inset-0 bg-white/95 backdrop-blur-sm z-50 flex flex-col items-center justify-center fade-in duration-300">
                 <Loader2 className="w-16 h-16 text-indigo-600 animate-spin mb-4" />
                 <h3 className="text-xl font-bold text-slate-800">Training Model...</h3>
                 <p className="text-slate-500 mt-2">Running {state.selectedModel} on cloud instances.</p>
@@ -164,7 +181,8 @@ const App: React.FC = () => {
             <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
               <button 
                 onClick={handleBack}
-                className="px-6 py-2.5 rounded-lg border border-slate-300 text-slate-700 font-medium hover:bg-slate-100 transition-colors flex items-center gap-2"
+                disabled={state.isTraining}
+                className="px-6 py-2.5 rounded-lg border border-slate-300 text-slate-700 font-medium hover:bg-slate-100 transition-colors flex items-center gap-2 disabled:opacity-50"
               >
                 <ArrowLeft className="w-4 h-4" /> Back
               </button>
@@ -172,11 +190,11 @@ const App: React.FC = () => {
               {state.step === 4 ? (
                  <button 
                  onClick={handleRunTraining}
-                 disabled={!state.selectedModel}
-                 className={`px-8 py-2.5 rounded-lg font-bold shadow-lg shadow-indigo-200 flex items-center gap-2 transition-all transform ${
-                   !state.selectedModel 
-                     ? 'bg-slate-300 text-slate-500 cursor-not-allowed' 
-                     : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105 active:scale-95'
+                 disabled={!state.selectedModel || state.isTraining}
+                 className={`px-8 py-2.5 rounded-lg font-bold shadow-lg flex items-center gap-2 transition-all transform ${
+                   !state.selectedModel || state.isTraining
+                     ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none' 
+                     : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105 active:scale-95 shadow-indigo-200'
                  }`}
                >
                  <Play className="w-4 h-4 fill-current" /> Run Pipeline

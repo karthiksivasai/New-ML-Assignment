@@ -1,26 +1,50 @@
 import { DataRow, ColumnStats, Dataset, ScalerType } from '../types';
 
 export const parseCSV = (text: string): { data: DataRow[]; columns: string[] } => {
-  const lines = text.trim().split('\n');
-  if (lines.length < 2) throw new Error('CSV must have at least header and one row');
-
-  // Simple CSV parser handling basic commas. For complex CSVs with quotes, a library is better, 
-  // but this suffices for the demo constraints.
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+  // Normalize line endings to \n
+  const normalizedText = text.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = normalizedText.split('\n');
   
+  if (lines.length < 2) throw new Error('CSV must have at least a header and one data row');
+
+  // Regex to split by comma while ignoring commas inside quotes
+  // Matches a comma only if it's followed by an even number of quotes (or 0) until the end of the string
+  const splitCSVLine = (line: string) => {
+    return line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(val => 
+      // Remove surrounding quotes and unescape double quotes
+      val.trim().replace(/^"|"$/g, '').replace(/""/g, '"')
+    );
+  };
+
+  const headers = splitCSVLine(lines[0]);
   const data: DataRow[] = [];
   
   for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',');
-    if (values.length !== headers.length) continue;
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    const values = splitCSVLine(line);
+    
+    // Skip malformed rows that don't match header count
+    if (values.length !== headers.length) {
+      console.warn(`Skipping row ${i + 1}: Expected ${headers.length} columns, got ${values.length}`);
+      continue;
+    }
 
     const row: DataRow = {};
     headers.forEach((header, index) => {
-      const valStr = values[index].trim().replace(/^"|"$/g, '');
-      const valNum = parseFloat(valStr);
-      row[header] = isNaN(valNum) ? valStr : valNum;
+      const valStr = values[index];
+      // Check if the value is a valid number and not an empty string (which Number() casts to 0)
+      const valNum = Number(valStr);
+      const isNumeric = !isNaN(valNum) && valStr !== '';
+      
+      row[header] = isNumeric ? valNum : valStr;
     });
     data.push(row);
+  }
+
+  if (data.length === 0) {
+    throw new Error('Parsed CSV contains no valid data rows');
   }
 
   return { data, columns: headers };
@@ -30,7 +54,7 @@ export const calculateStats = (data: DataRow[], columns: string[]): ColumnStats[
   return columns.map(col => {
     const values = data.map(d => d[col]);
     const numericValues = values.filter(v => typeof v === 'number') as number[];
-    const isNumeric = numericValues.length === values.length;
+    const isNumeric = numericValues.length === values.length && values.length > 0;
 
     if (!isNumeric) {
       const unique = new Set(values).size;

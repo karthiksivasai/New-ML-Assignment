@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo } from 'react';
-import { UploadCloud, FileText, BarChart2, Split, Database, Play, Check, AlertCircle } from 'lucide-react';
+import React, { useCallback, useMemo, useState } from 'react';
+import { UploadCloud, FileText, BarChart2, Split, Database, Play, Check, AlertCircle, FilePlus } from 'lucide-react';
 import { parseCSV, calculateStats } from '../utils/dataProcessing';
 import { Dataset, ScalerType, ModelType } from '../types';
 
@@ -9,10 +9,11 @@ interface UploadProps {
 }
 
 export const StepUpload: React.FC<UploadProps> = ({ onDataLoaded }) => {
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const [isDragging, setIsDragging] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
+  const processFile = (file: File) => {
+    setIsLoading(true);
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -22,35 +23,89 @@ export const StepUpload: React.FC<UploadProps> = ({ onDataLoaded }) => {
         
         onDataLoaded({
           raw: data,
-          processed: data, // Initially processed is same as raw
+          processed: data,
           columns,
           stats,
           targetColumn: null,
           featureColumns: [],
         });
-      } catch (err) {
-        alert('Error parsing CSV. Please ensure it is a valid format.');
+      } catch (err: any) {
+        alert(err.message || 'Error parsing CSV. Please ensure it is a valid format.');
+      } finally {
+        setIsLoading(false);
       }
     };
+    reader.onerror = () => {
+      alert("Failed to read file.");
+      setIsLoading(false);
+    }
     reader.readAsText(file);
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processFile(file);
+  };
+
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const onDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type === 'text/csv' || file?.name.endsWith('.csv')) {
+      processFile(file);
+    } else {
+      alert("Please upload a valid .csv file.");
+    }
+  };
+
   return (
-    <div className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer relative">
+    <div 
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={`flex flex-col items-center justify-center p-12 border-2 border-dashed rounded-xl transition-all duration-200 cursor-pointer relative min-h-[300px]
+        ${isDragging 
+          ? 'border-indigo-500 bg-indigo-50 scale-[1.02] shadow-xl' 
+          : 'border-slate-300 bg-slate-50 hover:bg-slate-100 hover:border-slate-400'
+        }`}
+    >
       <input 
         type="file" 
         accept=".csv" 
         onChange={handleFileChange} 
-        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+        disabled={isLoading}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
       />
-      <div className="bg-indigo-100 p-4 rounded-full mb-4">
-        <UploadCloud className="w-10 h-10 text-indigo-600" />
-      </div>
-      <h3 className="text-xl font-semibold text-slate-800">Upload Dataset</h3>
-      <p className="text-slate-500 mt-2 text-center max-w-sm">
-        Drag and drop your CSV file here, or click to browse.
-        <br/><span className="text-xs text-slate-400">Supported formats: .csv</span>
-      </p>
+      
+      {isLoading ? (
+        <div className="flex flex-col items-center animate-pulse">
+           <div className="w-12 h-12 bg-slate-200 rounded-full mb-4"></div>
+           <div className="h-4 w-32 bg-slate-200 rounded"></div>
+        </div>
+      ) : (
+        <>
+          <div className={`p-4 rounded-full mb-4 transition-colors ${isDragging ? 'bg-indigo-200' : 'bg-indigo-100'}`}>
+            <UploadCloud className={`w-10 h-10 ${isDragging ? 'text-indigo-700' : 'text-indigo-600'}`} />
+          </div>
+          <h3 className={`text-xl font-semibold transition-colors ${isDragging ? 'text-indigo-800' : 'text-slate-800'}`}>
+            {isDragging ? 'Drop file here' : 'Upload Dataset'}
+          </h3>
+          <p className="text-slate-500 mt-2 text-center max-w-sm">
+            Drag and drop your CSV file here, or click to browse.
+            <br/><span className="text-xs text-slate-400">Supported formats: .csv</span>
+          </p>
+        </>
+      )}
     </div>
   );
 };
@@ -74,7 +129,9 @@ export const StepPreprocess: React.FC<PreprocessProps> = ({ dataset, scaler, set
   };
 
   const setTarget = (col: string) => {
-    setDataset({ ...dataset, targetColumn: col });
+    // If setting target, remove it from features if present
+    const newFeatures = dataset.featureColumns.filter(c => c !== col);
+    setDataset({ ...dataset, targetColumn: col, featureColumns: newFeatures });
   };
 
   // Preview data (first 5 rows)
@@ -90,24 +147,24 @@ export const StepPreprocess: React.FC<PreprocessProps> = ({ dataset, scaler, set
             <h4 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
               <Database className="w-4 h-4" /> Column Roles
             </h4>
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-200">
               {dataset.columns.map(col => {
                 const isTarget = dataset.targetColumn === col;
                 const isFeature = dataset.featureColumns.includes(col);
                 return (
-                  <div key={col} className="flex items-center justify-between text-sm p-2 bg-slate-50 rounded">
-                    <span className="font-medium truncate w-24" title={col}>{col}</span>
+                  <div key={col} className="flex items-center justify-between text-sm p-2 bg-slate-50 rounded hover:bg-slate-100 transition-colors">
+                    <span className="font-medium truncate w-24 text-slate-700" title={col}>{col}</span>
                     <div className="flex gap-2">
                       <button
                         onClick={() => setTarget(col)}
-                        className={`px-2 py-1 rounded text-xs transition-colors ${isTarget ? 'bg-rose-500 text-white' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
+                        className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all ${isTarget ? 'bg-rose-500 text-white shadow-sm' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'}`}
                       >
                         Target
                       </button>
                       <button
                         onClick={() => toggleFeature(col)}
                         disabled={isTarget}
-                        className={`px-2 py-1 rounded text-xs transition-colors ${isFeature ? 'bg-indigo-500 text-white' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'} ${isTarget ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all ${isFeature ? 'bg-indigo-500 text-white shadow-sm' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'} ${isTarget ? 'opacity-30 cursor-not-allowed' : ''}`}
                       >
                         Feature
                       </button>
@@ -117,8 +174,8 @@ export const StepPreprocess: React.FC<PreprocessProps> = ({ dataset, scaler, set
               })}
             </div>
             {(!dataset.targetColumn || dataset.featureColumns.length === 0) && (
-              <p className="text-xs text-rose-500 mt-2 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" /> Select a target and features.
+              <p className="text-xs text-rose-500 mt-2 flex items-center gap-1 font-medium bg-rose-50 p-2 rounded">
+                <AlertCircle className="w-3 h-3" /> Please select 1 target & ≥1 feature.
               </p>
             )}
           </div>
@@ -129,21 +186,23 @@ export const StepPreprocess: React.FC<PreprocessProps> = ({ dataset, scaler, set
             </h4>
             <div className="space-y-2">
               {(['None', 'MinMax', 'Standard'] as ScalerType[]).map((type) => (
-                <label key={type} className="flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-slate-50 transition-colors">
-                  <input
-                    type="radio"
-                    name="scaler"
-                    value={type}
-                    checked={scaler === type}
-                    onChange={() => setScaler(type)}
-                    className="w-4 h-4 text-indigo-600 focus:ring-indigo-500"
-                  />
+                <label key={type} className="flex items-start gap-3 p-2 rounded cursor-pointer hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
+                  <div className="mt-0.5">
+                    <input
+                      type="radio"
+                      name="scaler"
+                      value={type}
+                      checked={scaler === type}
+                      onChange={() => setScaler(type)}
+                      className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                    />
+                  </div>
                   <div>
                     <span className="block text-sm font-medium text-slate-900">
-                      {type === 'None' ? 'No Scaling' : type === 'MinMax' ? 'Min-Max Normalization' : 'StandardScaler (Z-score)'}
+                      {type === 'None' ? 'No Scaling' : type === 'MinMax' ? 'Min-Max Normalization' : 'StandardScaler'}
                     </span>
-                    <span className="block text-xs text-slate-500">
-                      {type === 'None' ? 'Keep original values.' : type === 'MinMax' ? 'Scale values to [0, 1].' : 'Zero mean, unit variance.'}
+                    <span className="block text-xs text-slate-500 mt-0.5">
+                      {type === 'None' ? 'Keep original values.' : type === 'MinMax' ? 'Scales to [0, 1].' : 'Zero mean, unit variance.'}
                     </span>
                   </div>
                 </label>
@@ -154,15 +213,16 @@ export const StepPreprocess: React.FC<PreprocessProps> = ({ dataset, scaler, set
 
         {/* Data Preview */}
         <div className="md:col-span-2 bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-          <div className="p-4 bg-slate-50 border-b border-slate-200">
+          <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
              <h4 className="font-semibold text-slate-800">Processed Data Preview</h4>
+             <span className="text-xs bg-slate-200 text-slate-600 px-2 py-1 rounded-full">{dataset.processed.length} rows</span>
           </div>
           <div className="overflow-x-auto flex-1">
             <table className="w-full text-sm text-left">
               <thead className="bg-slate-50 text-slate-500 font-medium">
                 <tr>
                   {dataset.columns.map(col => (
-                    <th key={col} className={`px-4 py-3 whitespace-nowrap ${col === dataset.targetColumn ? 'bg-rose-50 text-rose-700' : ''}`}>
+                    <th key={col} className={`px-4 py-3 whitespace-nowrap text-xs uppercase tracking-wider ${col === dataset.targetColumn ? 'bg-rose-50 text-rose-700' : ''}`}>
                       {col} {col === dataset.targetColumn && '(Target)'}
                     </th>
                   ))}
@@ -170,7 +230,7 @@ export const StepPreprocess: React.FC<PreprocessProps> = ({ dataset, scaler, set
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {previewData.map((row, i) => (
-                  <tr key={i} className="hover:bg-slate-50">
+                  <tr key={i} className="hover:bg-slate-50 transition-colors">
                     {dataset.columns.map(col => (
                       <td key={`${i}-${col}`} className="px-4 py-3 font-mono text-xs text-slate-600">
                         {typeof row[col] === 'number' ? (row[col] as number).toFixed(4) : row[col]}
@@ -182,7 +242,7 @@ export const StepPreprocess: React.FC<PreprocessProps> = ({ dataset, scaler, set
             </table>
           </div>
           <div className="p-2 text-center text-xs text-slate-400 bg-slate-50 border-t border-slate-200">
-            Showing first 5 rows of {dataset.processed.length}
+            Previewing first 5 rows
           </div>
         </div>
       </div>
@@ -225,17 +285,17 @@ export const StepSplit: React.FC<SplitProps> = ({ ratio, setRatio, totalRows }) 
         </div>
 
         <div className="flex items-center justify-center gap-4">
-          <div className="flex flex-col items-center p-4 bg-indigo-50 rounded-lg w-40 border border-indigo-100">
+          <div className="flex flex-col items-center p-4 bg-indigo-50 rounded-lg w-40 border border-indigo-100 transition-all hover:shadow-md">
             <span className="text-3xl font-bold text-indigo-600">{ratio}%</span>
-            <span className="text-sm text-indigo-800 font-medium">Training Set</span>
+            <span className="text-sm text-indigo-800 font-medium uppercase tracking-wide">Training Set</span>
             <span className="text-xs text-indigo-400 mt-1">{trainCount} rows</span>
           </div>
           
           <div className="text-slate-300 font-bold text-xl">+</div>
 
-          <div className="flex flex-col items-center p-4 bg-rose-50 rounded-lg w-40 border border-rose-100">
+          <div className="flex flex-col items-center p-4 bg-rose-50 rounded-lg w-40 border border-rose-100 transition-all hover:shadow-md">
             <span className="text-3xl font-bold text-rose-500">{100 - ratio}%</span>
-            <span className="text-sm text-rose-800 font-medium">Testing Set</span>
+            <span className="text-sm text-rose-800 font-medium uppercase tracking-wide">Testing Set</span>
             <span className="text-xs text-rose-400 mt-1">{testCount} rows</span>
           </div>
         </div>
@@ -257,36 +317,36 @@ export const StepModel: React.FC<ModelProps> = ({ selected, onSelect }) => {
         { 
           id: 'LogisticRegression', 
           name: 'Logistic Regression', 
-          desc: 'Best for binary classification tasks. Estimates the probability of an event occurring.',
+          desc: 'A statistical model used for binary classification. It predicts the probability of an occurrence by fitting data to a logit function.',
           icon: '📉'
         },
         { 
           id: 'DecisionTree', 
           name: 'Decision Tree Classifier', 
-          desc: 'Splits data into branches to make predictions. Easy to interpret and handles non-linear data well.',
+          desc: 'A tree-structured model where internal nodes represent feature tests, and leaf nodes represent class labels. Great for non-linear data.',
           icon: '🌳'
         }
       ].map((model) => (
         <div 
           key={model.id}
           onClick={() => onSelect(model.id as ModelType)}
-          className={`cursor-pointer p-6 rounded-xl border-2 transition-all duration-200 hover:shadow-md ${
+          className={`cursor-pointer p-6 rounded-xl border-2 transition-all duration-200 hover:shadow-lg ${
             selected === model.id 
             ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-200 ring-offset-2' 
             : 'border-slate-200 bg-white hover:border-indigo-300'
           }`}
         >
-          <div className="text-4xl mb-4">{model.icon}</div>
+          <div className="flex justify-between items-start mb-4">
+            <div className="text-4xl">{model.icon}</div>
+            <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${selected === model.id ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'}`}>
+              {selected === model.id && <Check className="w-4 h-4 text-white" />}
+            </div>
+          </div>
+          
           <h3 className={`text-lg font-bold mb-2 ${selected === model.id ? 'text-indigo-800' : 'text-slate-800'}`}>
             {model.name}
           </h3>
           <p className="text-slate-600 text-sm leading-relaxed">{model.desc}</p>
-          
-          <div className="mt-4 flex justify-end">
-            <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${selected === model.id ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'}`}>
-              {selected === model.id && <Check className="w-4 h-4 text-white" />}
-            </div>
-          </div>
         </div>
       ))}
     </div>

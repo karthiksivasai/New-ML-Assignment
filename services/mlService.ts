@@ -9,7 +9,7 @@ export const trainModel = async (
 ): Promise<TrainingResults> => {
   
   if (!process.env.API_KEY) {
-    throw new Error("API Key is missing. Please configure the environment.");
+    throw new Error("System Error: API Key is missing. Please contact administrator.");
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -81,12 +81,16 @@ export const trainModel = async (
       }
     });
 
-    const jsonText = result.text;
-    if (!jsonText) throw new Error("No response from AI");
+    let jsonText = result.text;
+    if (!jsonText) throw new Error("Received empty response from the AI model.");
+    
+    // Robust sanitization: Remove potential Markdown code blocks that models sometimes output
+    jsonText = jsonText.replace(/```json/g, '').replace(/```/g, '').trim();
     
     return JSON.parse(jsonText) as TrainingResults;
   } catch (error) {
     console.error("ML Service Error:", error);
-    throw new Error("Failed to train model. Please try again.");
+    // User-friendly error mapping
+    throw new Error("Failed to train model. Please try again or check your data format.");
   }
 };
